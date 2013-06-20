@@ -11,6 +11,7 @@ import pandas as pd
 import scipy as sp
 import sklearn as sk
 from sklearn import (metrics, cross_validation, linear_model, preprocessing, metrics)
+import logging
 
 
 identity = lambda x: x
@@ -142,7 +143,10 @@ def feature_selection(model, X, y, max_features, scoring, transform=identity,
                       stop_val=0.00001, kfold=3, random_state=567,
                       features_sel=[], remove_worst=5):
     """
-    Select best features of X to predict y using model
+    Select best features of X to predict y using model using greedy forward selection.
+
+    On every iteration select the best feature to improve the model (according to scoring)
+    and remove the worst N, to speed up the process
 
     Parameters
     ----------
@@ -203,7 +207,7 @@ def feature_selection(model, X, y, max_features, scoring, transform=identity,
                 scores_f.append((sp.mean(scores), i))
         scores_f = sorted(scores_f, reverse=True)
 
-        print scores_f[0:2]
+        logging.info("Best two: " + str(scores_f[0:2]))
         if len(scores_f) == 0:
             break
 
@@ -214,13 +218,13 @@ def feature_selection(model, X, y, max_features, scoring, transform=identity,
 
         # Remove worst features
         if len(scores_f) > remove_worst:
-            print scores_f[-remove_worst:]
+            logging.info("Worst " + str(remove_worst) + ": " + str(scores_f[-remove_worst:]))
             for m in range(-remove_worst,0):
                 features_removed.append(scores_f[m][1])
 
         #print scores_f[1]
-        print features_sel
-        print "--"
+        logging.info(features_sel)
+        logging.debug("---")
         if (scores_f[0][0] - pre_score) < stop_val:
             break
         pre_score = scores_f[0][0]
