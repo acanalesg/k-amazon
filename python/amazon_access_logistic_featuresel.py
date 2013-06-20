@@ -1,4 +1,5 @@
 __author__ = 'acg'
+#Special thanks to Paul Duan and Miroslav Horbal
 
 import numpy as np
 import pandas as pd
