@@ -4,15 +4,16 @@ import numpy as np
 import pandas as pd
 import scipy as sp
 import sklearn as sk
+import math
 from utils import combs, my_cross_val_score, auc_roc, feature_selection
+import logging
 
 # Configuration
 SEED = 2892
-ktuples_max = 6
+ktuples_max = 2
 feature_sel_stop = 0.00001
-feature_remove_worst = 10
+feature_remove_worst = 4
 preselected = []
-#preselected = [0, 1, 5, 7]
 
 
 def load_data(filename):
@@ -33,12 +34,15 @@ def combine_variables(X, k):
     From size 1 (singles) to k
     """
     X_plus = []
+
+    # Create combinations of features, up to size k
     for j in range(1, k+1):
         for i in combs(7, j):
-            X_plus.append([hash(tuple(v)) % 800000 for v in X[:, i]])
+            X_plus.append([hash(tuple(v)) for v in X[:, i]])
+
+
 
     X = np.array(X_plus).T
-
     return X
 
 
@@ -46,13 +50,34 @@ def create_new_features(X):
     """
     Transform data and create new features
     """
+
     # Include new variables (combinations)
-    print "create combs for X"
-    X = combine_variables(X, ktuples_max)
-    #X = Xcomb
-    #X = np.hstack([X, X/2, X/3, Xcomb])
-    #print X[1,:]
-    print X.shape
+    logging.info("create combs for X size " + str(X.shape))
+    X_c = combine_variables(X, ktuples_max)
+
+    # Create vars by dividing (as integers)
+    # "factors" seeking if the nearer groups (i.e Depts)
+    # hold also nearer ids
+    X_n = []
+    for i in range(1,7):
+        ix = (0, i)
+        X_n.append([hash(tuple(v)) for v in X[:, ix]/10])
+        X_n.append([hash(tuple(v)) for v in X[:, ix]/100])
+        X_n.append([hash(tuple(v)) for v in X[:, ix]/1000])
+        X_n.append([hash(tuple(v)) for v in X[:, ix]/10000])
+        X_n.append([hash(tuple(v)) for v in X[:, ix]/100000])
+
+
+
+    # To this point, all variables are categorical
+    # Explore creating some quantitative features based on
+    # people per Department, people per manager, ...
+
+
+    X_n = np.array(X_n).T
+    X = np.hstack([X_c, X_n])
+
+    logging.debug("Dataset dimensions: " + str(X.shape))
 
     return X
 
@@ -61,14 +86,21 @@ def encode_factors(X, X_test):
     """
     Encode
     """
+    # Label encoder (hash values not valid as input for onehotencoder
+    labelencoder = sk.preprocessing.LabelEncoder()
+    labelencoder.fit(np.vstack([X, X_test]))
+
+    X = labelencoder.transform(X)
+    X_test = labelencoder.transform(X_test)
+
     # Use one hot encoder to codify factors (all) as dummy variables
     encoder = sk.preprocessing.OneHotEncoder()
     encoder.fit(np.vstack([X, X_test]))
     X = encoder.transform(X)  # Returns a sparse matrix (see numpy.sparse)
     X_test = encoder.transform(X_test)
 
-    print X.shape
-    print X_test.shape
+    logging.debug(X.shape)
+    logging.debug(X_test.shape)
 
     return X, X_test
 
@@ -77,11 +109,19 @@ def encode_factors_single(X):
     """
     Encode
     """
+    #logging.debug("Input shape: " + str(X.shape))
+    # Label encoder (hash values not valid as input for onehotencoder
+    labelencoder = sk.preprocessing.LabelEncoder()
+    labelencoder.fit(X)
+
+    X = labelencoder.transform(X)
+
     # Use one hot encoder to codify factors (all) as dummy variables
     encoder = sk.preprocessing.OneHotEncoder()
     encoder.fit(np.vstack([X]))
     X = encoder.transform(X)  # Returns a sparse matrix (see numpy.sparse)
 
+    #logging.debug("Output shape (sparse): " + str(X.shape))
     #print X.shape
     return X
 
@@ -101,22 +141,24 @@ def pick_best_params(model, X, y):
     """
     opt_scores = []
     for C in np.arange(0.5, 4, 0.3):
-        for p in (True, False):
-            #model = linear_model.LogisticRegression(C=C, penalty=p)  # the classifier we'll use
+        for p in (True, ):
             model.C = C
             model.dual = p
 
             # Train and Crossvalidate
             scores, _ = my_cross_val_score(model, X, y, auc_roc, 3)
             #print str(scores)
-            print "Mean AUC for p=%s, C=%f: %f" % (p, C, sp.mean(scores))
+            logging.debug("Mean AUC for p=%s, C=%f: %f" % (p, C, sp.mean(scores)))
             opt_scores.append((sp.mean(scores), p, C))
     opt_scores = sorted(opt_scores, reverse=True)
-    print opt_scores
+    logging.debug(opt_scores)
     return opt_scores[0][-1]
 
 if __name__ == '__main__':
 
+    logging.basicConfig(level=logging.DEBUG,
+                        format='%(asctime)s %(levelname)s %(message)s',
+                        )
 
     # Model
     #model = linear_model.LogisticRegression(C=5.7, penalty="l2", dual=True)  # the classifier we'll use
@@ -125,17 +167,17 @@ if __name__ == '__main__':
     model = sk.linear_model.LogisticRegression(penalty="l2", dual=True)
     #model = sk.svm.SVC(probability=True)
 
-    print "Loading train data"
+    logging.info("Loading train data")
     X, y = load_data("/data/kaggle/amazon_access/train.csv")
 
-    print "Loading test data"
+    logging.info("Loading test data")
     X_test, _ = load_data("/data/kaggle/amazon_access/test.csv")
 
-    print "Create new features"
+    logging.info("Create new features")
     X = create_new_features(X)
     X_test = create_new_features(X_test)
 
-    print "Select best features"
+    logging.info("Select best features")
     # Think about split test and train for crossvalidating feature selection
     # Xf_train, Xf_cv, yf_train, yf_cv = sk.cross_validation.train_test_split(
     #    X, y, test_size=.20, random_state=SEED*150)
@@ -148,28 +190,28 @@ if __name__ == '__main__':
                                  random_state=SEED*78,
                                  features_sel=preselected,
                                  remove_worst=feature_remove_worst)
-    #features = [0, 51, 61, 43, 34, 33, 52, 29, 80, 92, 73, 64, 90, 32, 63]
+
     X = X[:, features]
     X_test = X_test[:, features]
-    print X.shape
+    logging.debug(X.shape)
 
-    print "Encoding factors/transform data"
+    logging.info("Encoding factors/transform data")
     X, X_test = encode_factors(X, X_test)
 
-    print "Find best params for model (C)"
+    logging.info("Find best params for model (C)")
     model.C = pick_best_params(model, X, y)
 
     # Get cross_val scores
-    print "Cross-validate"
+    logging.info("Cross-validate")
     scores, _ = my_cross_val_score(model, X, y, auc_roc, 10, random_state=SEED*31)
     #print str(scores)
-    print "Mean AUC: %f" % (sp.mean(scores))
+    logging.info("Mean AUC: %f" % (sp.mean(scores)))
 
     # Train with whole dataset
-    print "Train with the whole dataset"
+    logging.info("Train with the whole dataset")
     model.fit(X, y)
     preds = model.predict_proba(X_test)[:, 1]
 
     # Save results
-    print "Save results"
+    logging.info("Save results")
     save_results(preds, "new_sal.csv")
